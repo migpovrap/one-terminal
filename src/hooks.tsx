@@ -17,7 +17,7 @@ import type {
 } from "./types";
 
 // Built-in commands
-const BUILTIN_COMMANDS = ["help", "ls", "cd", "cat", "echo", "pwd", "clear"];
+const BUILTIN_COMMANDS = ["help", "ls", "tree", "cd", "cat", "echo", "pwd", "clear"];
 
 function isDirectory(node: FSNode | undefined | null): node is DirectoryNode {
   return !!node && typeof node === "object" && node.kind === "directory";
@@ -74,6 +74,7 @@ function getPathCompletionScopeForCommand(
   if (cmd === "cd") return "directories";
   if (cmd === "cat") return "files";
   if (cmd === "ls") return "any";
+  if (cmd === "tree") return "directories";
 
   const def: ExtraCommandDefinition | undefined =
     extraCommands && extraCommands[cmd];
@@ -205,6 +206,54 @@ export function useTerminalEngine(
         }
 
         return makeEntry("(unknown node type)");
+      }
+
+      if (cmd === "tree") {
+        const rawTarget = args[0] ?? ".";
+
+        const targetPath = resolvePath(rawTarget);
+        const node = getNodeAt(targetPath);
+
+        if (!node) {
+          return makeEntry(`tree: cannot access '${rawTarget}': No such file or directory`);
+        }
+
+        if (isFile(node)) {
+          return makeEntry(rawTarget);
+        }
+
+        const lines: string[] = [];
+
+        const walk = (
+          cur: DirectoryNode,
+          name: string,
+          depthLevel: number,
+          prefix: string,
+          isLast: boolean
+        ) => {
+          const connector = depthLevel === 0 ? name : `${isLast ? "└── " : "├── "}${name}`;
+          lines.push(prefix + connector);
+
+          const entries = Object.entries(cur.entries)
+            .sort(([a], [b]) => a.localeCompare(b));
+
+          entries.forEach(([childName, childNode], idx) => {
+            const last = idx === entries.length - 1;
+            if (isDirectory(childNode)) {
+              const newPrefix = prefix + (depthLevel === 0 ? "" : isLast ? "    " : "│   ");
+              walk(childNode as DirectoryNode, childName, depthLevel + 1, newPrefix, last);
+            } else {
+              const childLine = prefix + (depthLevel === 0 ? "" : isLast ? "    " : "│   ") +
+                `${last ? "└── " : "├── "}${childName}`;
+              lines.push(childLine);
+            }
+          });
+        };
+
+        const rootName = rawTarget === "." ? "." : rawTarget;
+        walk(node as DirectoryNode, rootName, 0, "", true);
+
+        return makeEntry(lines.join("\n"));
       }
 
       if (cmd === "cd") {
